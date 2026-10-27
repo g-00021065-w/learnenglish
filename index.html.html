@@ -1,0 +1,923 @@
+<!DOCTYPE html>
+<html lang="ms">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Monster Punch - Brain Brawl (Year 1 Nouns)</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Fredoka+One&family=Quicksand:wght@600;700&display=swap" rel="stylesheet">
+    
+    <!-- MediaPipe Hands & Camera Utils CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
+    <style>
+        body {
+            font-family: 'Quicksand', sans-serif;
+            user-select: none;
+            overflow: hidden;
+            background: linear-gradient(135deg, #1e1b4b 0%, #311b92 50%, #4a148c 100%);
+        }
+
+        .font-game {
+            font-family: 'Fredoka One', cursive;
+        }
+
+        /* Canvas Overlay Fixes */
+        #webcam-video {
+            transform: scaleX(-1);
+        }
+        
+        #game-canvas {
+            transform: scaleX(-1);
+        }
+
+        /* Custom Animations */
+        @keyframes floatMonster {
+            0%, 100% { transform: translateY(0px) rotate(-2deg); }
+            50% { transform: translateY(-15px) rotate(2deg); }
+        }
+
+        .floating {
+            animation: floatMonster 2.5s ease-in-out infinite;
+        }
+
+        @keyframes pulseGlow {
+            0%, 100% { box-shadow: 0 0 20px rgba(236, 72, 153, 0.6); }
+            50% { box-shadow: 0 0 40px rgba(236, 72, 153, 0.9); }
+        }
+
+        .glow-box {
+            animation: pulseGlow 2s infinite;
+        }
+
+        /* Slash Effect Animation */
+        .slash-mark {
+            position: absolute;
+            pointer-events: none;
+            width: 120px;
+            height: 120px;
+            background: linear-gradient(45deg, transparent 40%, #ff0055 45%, #ffffff 50%, #ff0055 55%, transparent 60%);
+            transform: translate(-50%, -50%) rotate(-30deg) scale(0);
+            animation: slashAnim 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+            z-index: 50;
+        }
+
+        @keyframes slashAnim {
+            0% { transform: translate(-50%, -50%) rotate(-45deg) scale(0.2); opacity: 1; }
+            50% { transform: translate(-50%, -50%) rotate(15deg) scale(1.4); opacity: 1; }
+            100% { transform: translate(-50%, -50%) rotate(30deg) scale(1.8); opacity: 0; }
+        }
+    </style>
+</head>
+<body class="h-screen w-screen flex flex-col justify-between items-center relative overflow-hidden text-white">
+
+    <!-- Container Utama Video & Game Canvas Overlay -->
+    <div class="absolute inset-0 z-0 flex items-center justify-center">
+        <!-- Video Webcam (Disembunyikan secara visual tetapi digunakan oleh canvas) -->
+        <video id="webcam-video" class="hidden" playsinline></video>
+        
+        <!-- Canvas Paparan Kamera + Tracking Hands + Visual Game -->
+        <canvas id="game-canvas" class="w-full h-full object-cover"></canvas>
+    </div>
+
+    <!-- Interface Hadapan (UI Overlay) -->
+    <div id="ui-layer" class="relative z-10 w-full h-full flex flex-col justify-between p-4 md:p-6 pointer-events-none">
+        
+        <!-- Top Bar: Nyawa, Masa, Skor -->
+        <div class="flex justify-between items-center bg-black/40 backdrop-blur-md border-2 border-white/20 rounded-2xl p-4 shadow-2xl">
+            <!-- Nyawa -->
+            <div class="flex items-center gap-2">
+                <span class="text-sm md:text-xl font-game text-yellow-300">LIVES:</span>
+                <div id="lives-container" class="flex gap-1 text-2xl md:text-3xl">
+                    ❤️ ❤️ ❤️
+                </div>
+            </div>
+
+            <!-- Timer -->
+            <div class="flex flex-col items-center">
+                <span class="text-xs font-bold text-gray-300 tracking-wider">TIME LEFT</span>
+                <div id="timer-display" class="font-game text-3xl md:text-5xl text-cyan-400 drop-shadow-[0_0_10px_rgba(34,211,238,0.8)]">
+                    15
+                </div>
+            </div>
+
+            <!-- Skor -->
+            <div class="flex items-center gap-2">
+                <span class="text-sm md:text-xl font-game text-yellow-300">SCORE:</span>
+                <span id="score-display" class="font-game text-3xl md:text-4xl text-green-400">0</span>
+            </div>
+        </div>
+
+        <!-- Kad Soalan (Tengah Atas) -->
+        <div id="question-card" class="self-center mt-2 bg-gradient-to-r from-purple-900/90 to-indigo-900/90 border-4 border-yellow-400 rounded-3xl p-4 md:p-6 shadow-2xl text-center max-w-xl w-full backdrop-blur-md transform transition-all duration-300">
+            <span id="question-number" class="inline-block bg-yellow-400 text-purple-950 font-game px-3 py-1 rounded-full text-xs md:text-sm font-bold mb-2">
+                QUESTION 1 / 10
+            </span>
+            <div class="flex flex-col items-center justify-center gap-2">
+                <div id="question-image" class="text-6xl md:text-8xl my-1 animate-bounce">
+                    🐱
+                </div>
+                <h2 id="question-text" class="font-game text-xl md:text-3xl text-white tracking-wide drop-shadow-lg">
+                    What noun is shown in the picture?
+                </h2>
+            </div>
+        </div>
+
+        <!-- Panduan Gumpal Tangan / Status -->
+        <div class="flex justify-between items-end w-full">
+            <div class="bg-black/50 backdrop-blur-md p-3 rounded-xl border border-white/20 text-xs md:text-sm flex items-center gap-3">
+                <div class="w-8 h-8 rounded-full bg-red-500/80 flex items-center justify-center text-lg animate-pulse">
+                    ✊
+                </div>
+                <div>
+                    <p class="font-bold text-yellow-300">CARA MAIN:</p>
+                    <p class="text-gray-200">Kepalkan tangan (tumbuk) tepat pada monster dengan jawapan betul!</p>
+                </div>
+            </div>
+
+            <!-- Indicator Pengesanan Penumbuk -->
+            <div id="fist-status" class="bg-red-900/80 border border-red-500 text-red-200 px-4 py-2 rounded-xl text-xs md:text-sm font-bold flex items-center gap-2">
+                <span class="w-3 h-3 rounded-full bg-red-500 inline-block animate-ping"></span>
+                <span>NO FIST DETECTED</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Skrin Mula (Start Screen Overlay) -->
+    <div id="start-screen" class="fixed inset-0 z-50 flex flex-col items-center justify-center bg-slate-950/90 backdrop-blur-lg p-6 text-center pointer-events-auto">
+        <div class="max-w-md w-full bg-slate-900 border-4 border-pink-500 rounded-3xl p-8 shadow-[0_0_50px_rgba(236,72,153,0.5)] flex flex-col items-center">
+            <h1 class="font-game text-4xl md:text-5xl text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 via-pink-500 to-cyan-400 mb-2 leading-tight">
+                MONSTER PUNCH!
+            </h1>
+            <p class="font-game text-lg text-cyan-300 mb-6 tracking-wide">BRAIN BRAWL: YEAR 1 NOUNS</p>
+            
+            <div class="bg-slate-800/80 p-4 rounded-2xl border border-slate-700 text-left text-sm text-gray-300 mb-6 space-y-2 w-full">
+                <p class="flex items-center gap-2"><span class="text-xl">📷</span> 1. Benarkan akses kamera webcam.</p>
+                <p class="flex items-center gap-2"><span class="text-xl">✊</span> 2. Kepalkan tangan untuk membentuk <b>TUMBUKAN</b>.</p>
+                <p class="flex items-center gap-2"><span class="text-xl">👾</span> 3. Halakan penumbuk & pukul raksasa dengan jawapan <b>BETUL</b>!</p>
+                <p class="flex items-center gap-2"><span class="text-xl">⏱️</span> 4. Jawab sebelum masa 15s tamat.</p>
+            </div>
+
+            <button id="btn-start" class="w-full bg-gradient-to-r from-emerald-400 to-green-600 hover:from-emerald-300 hover:to-green-500 text-slate-950 font-game text-2xl py-4 rounded-2xl shadow-lg transition-transform hover:scale-105 active:scale-95 cursor-pointer">
+                START GAME 🥊
+            </button>
+            
+            <p id="loading-text" class="text-xs text-yellow-400 mt-4 hidden animate-pulse">
+                Memuatkan model AI MediaPipe Hands... Sila tunggu...
+            </p>
+        </div>
+    </div>
+
+    <!-- Skrin Tamat Game (Game Over / Victory Screen) -->
+    <div id="end-screen" class="fixed inset-0 z-50 flex flex-col items-center justify-center bg-slate-950/95 backdrop-blur-xl p-6 text-center hidden pointer-events-auto">
+        <div class="max-w-md w-full bg-slate-900 border-4 border-yellow-400 rounded-3xl p-8 shadow-[0_0_50px_rgba(250,204,21,0.4)] flex flex-col items-center">
+            <div id="end-icon" class="text-7xl mb-2">🏆</div>
+            <h2 id="end-title" class="font-game text-4xl text-yellow-400 mb-2">GREAT JOB!</h2>
+            <p id="end-subtitle" class="text-gray-300 mb-6">You master the Year 1 Nouns!</p>
+
+            <div class="bg-slate-800 w-full p-4 rounded-2xl border border-slate-700 mb-6 space-y-2">
+                <div class="flex justify-between items-center text-lg">
+                    <span class="text-gray-400">Final Score:</span>
+                    <span id="final-score" class="font-game text-3xl text-green-400">0</span>
+                </div>
+                <div class="flex justify-between items-center text-sm">
+                    <span class="text-gray-400">Accuracy:</span>
+                    <span id="final-accuracy" class="font-bold text-cyan-300">100%</span>
+                </div>
+            </div>
+
+            <button id="btn-restart" class="w-full bg-gradient-to-r from-cyan-400 to-blue-600 hover:from-cyan-300 hover:to-blue-500 text-slate-950 font-game text-2xl py-4 rounded-2xl shadow-lg transition-transform hover:scale-105 active:scale-95 cursor-pointer">
+                PLAY AGAIN 🔄
+            </button>
+        </div>
+    </div>
+
+    <!-- Audio Effects (Web Audio API Synthesizer) -->
+    <script>
+        // Web Audio API Synthesizer untuk Kesan Bunyi (Tiada External Audio Assets Needed)
+        class SoundFX {
+            constructor() {
+                this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+            }
+
+            init() {
+                if (this.ctx.state === 'suspended') {
+                    this.ctx.resume();
+                }
+            }
+
+            // Bunyi Tumbukan / Punch Hit
+            playPunch() {
+                this.init();
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(150, this.ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(30, this.ctx.currentTime + 0.15);
+
+                gain.gain.setValueAtTime(1, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.15);
+
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.15);
+            }
+
+            // Bunyi Jawapan Betul
+            playCorrect() {
+                this.init();
+                const notes = [523.25, 659.25, 783.99, 1046.50]; // C5, E5, G5, C6
+                notes.forEach((freq, i) => {
+                    const osc = this.ctx.createOscillator();
+                    const gain = this.ctx.createGain();
+
+                    osc.type = 'sine';
+                    osc.frequency.value = freq;
+
+                    const startTime = this.ctx.currentTime + (i * 0.08);
+                    gain.gain.setValueAtTime(0.3, startTime);
+                    gain.gain.exponentialRampToValueAtTime(0.01, startTime + 0.2);
+
+                    osc.connect(gain);
+                    gain.connect(this.ctx.destination);
+
+                    osc.start(startTime);
+                    osc.stop(startTime + 0.2);
+                });
+            }
+
+            // Bunyi Jawapan Salah / Masa Tamat
+            playWrong() {
+                this.init();
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(180, this.ctx.currentTime);
+                osc.frequency.linearRampToValueAtTime(60, this.ctx.currentTime + 0.3);
+
+                gain.gain.setValueAtTime(0.4, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.3);
+
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.3);
+            }
+
+            // Bunyi Game Over
+            playGameOver() {
+                this.init();
+                const notes = [300, 260, 220, 150];
+                notes.forEach((freq, i) => {
+                    const osc = this.ctx.createOscillator();
+                    const gain = this.ctx.createGain();
+
+                    osc.type = 'sawtooth';
+                    osc.frequency.value = freq;
+
+                    const startTime = this.ctx.currentTime + (i * 0.15);
+                    gain.gain.setValueAtTime(0.3, startTime);
+                    gain.gain.exponentialRampToValueAtTime(0.01, startTime + 0.25);
+
+                    osc.connect(gain);
+                    gain.connect(this.ctx.destination);
+
+                    osc.start(startTime);
+                    osc.stop(startTime + 0.25);
+                });
+            }
+        }
+
+        const soundFX = new SoundFX();
+    </script>
+
+    <!-- Game Logic & MediaPipe Integration Script -->
+    <script>
+        // -------------------------------------------------------------
+        // DATA SOALAN: 10 Soalan Nouns Bahasa Inggeris Tahun 1
+        // -------------------------------------------------------------
+        const questionsData = [
+            {
+                image: "🐱",
+                question: "What noun is this animal?",
+                options: ["Cat", "Dog", "Bird"],
+                answer: "Cat"
+            },
+            {
+                image: "🚗",
+                question: "Identify this vehicle noun:",
+                options: ["Bicycle", "Car", "Bus"],
+                answer: "Car"
+            },
+            {
+                image: "🍎",
+                question: "What fruit noun is shown?",
+                options: ["Banana", "Apple", "Orange"],
+                answer: "Apple"
+            },
+            {
+                image: "🏫",
+                question: "Name this place noun:",
+                options: ["School", "Park", "Hospital"],
+                answer: "School"
+            },
+            {
+                image: "✏️",
+                question: "What classroom object is this?",
+                options: ["Ruler", "Pencil", "Eraser"],
+                answer: "Pencil"
+            },
+            {
+                image: "🐶",
+                question: "Which pet noun is this?",
+                options: ["Dog", "Rabbit", "Fish"],
+                answer: "Dog"
+            },
+            {
+                image: "📖",
+                question: "What object noun do you read?",
+                options: ["Book", "Bag", "Desk"],
+                answer: "Book"
+            },
+            {
+                image: "🌳",
+                question: "What plant noun is this?",
+                options: ["Flower", "Tree", "Grass"],
+                answer: "Tree"
+            },
+            {
+                image: "🎒",
+                question: "What noun do you carry to school?",
+                options: ["Bag", "Hat", "Shoe"],
+                answer: "Bag"
+            },
+            {
+                image: "⚽",
+                question: "What toy/sports noun is this?",
+                options: ["Ball", "Doll", "Kite"],
+                answer: "Ball"
+            }
+        ];
+
+        // Raksasa Design Templates (Avatar & Warna)
+        const monsterVisuals = [
+            { avatar: "👾", bg: "rgba(236, 72, 153, 0.85)", stroke: "#f472b6" }, // Pink
+            { avatar: "👹", bg: "rgba(168, 85, 247, 0.85)", stroke: "#c084fc" }, // Purple
+            { avatar: "👺", bg: "rgba(34, 197, 94, 0.85)", stroke: "#4ade80" },  // Green
+            { avatar: "👽", bg: "rgba(14, 165, 233, 0.85)", stroke: "#38bdf8" }, // Cyan
+            { avatar: "🤖", bg: "rgba(249, 115, 22, 0.85)", stroke: "#fb923c" }  // Orange
+        ];
+
+        // Game State Variables
+        let currentQuestionIdx = 0;
+        let score = 0;
+        let lives = 3;
+        let timer = 15;
+        let timerInterval = null;
+        let isGameRunning = false;
+        let totalAnswered = 0;
+        let correctHits = 0;
+
+        // Monsters Array dalam Arena Game
+        let activeMonsters = [];
+
+        // Hand Tracking & Fist State Variables
+        let fistPosition = { x: 0, y: 0, isFist: false };
+        let punchCooldown = false;
+
+        // Visual Slash Effects Array
+        let activeSlashes = [];
+
+        // DOM Elements
+        const videoElement = document.getElementById('webcam-video');
+        const canvasElement = document.getElementById('game-canvas');
+        const canvasCtx = canvasElement.getContext('2d');
+        const startScreen = document.getElementById('start-screen');
+        const endScreen = document.getElementById('end-screen');
+        const btnStart = document.getElementById('btn-start');
+        const btnRestart = document.getElementById('btn-restart');
+        const loadingText = document.getElementById('loading-text');
+        const fistStatusEl = document.getElementById('fist-status');
+        
+        const livesContainer = document.getElementById('lives-container');
+        const timerDisplay = document.getElementById('timer-display');
+        const scoreDisplay = document.getElementById('score-display');
+        const questionNumber = document.getElementById('question-number');
+        const questionImage = document.getElementById('question-image');
+        const questionText = document.getElementById('question-text');
+
+        // Adjust Canvas Size to Window
+        function resizeCanvas() {
+            canvasElement.width = window.innerWidth;
+            canvasElement.height = window.innerHeight;
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        // -------------------------------------------------------------
+        // MEDIAPIPE HANDS SETUP
+        // -------------------------------------------------------------
+        const hands = new Hands({
+            locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+        });
+
+        hands.setOptions({
+            maxNumHands: 1,
+            modelComplexity: 1,
+            minDetectionConfidence: 0.65,
+            minTrackingConfidence: 0.65
+        });
+
+        hands.onResults(onHandResults);
+
+        // MediaPipe Camera Helper
+        let camera = null;
+
+        function startCamera() {
+            camera = new Camera(videoElement, {
+                onFrame: async () => {
+                    if (isGameRunning || !startScreen.classList.contains('hidden')) {
+                        await hands.send({ image: videoElement });
+                    }
+                },
+                width: 1280,
+                height: 720
+            });
+            camera.start();
+        }
+
+        // Detect Fist (Gumpalan Tangan) Function
+        // Mengira jarak antara hujung jari (fingertips) dengan tapak tangan (wrist / MCP)
+        function checkIsFist(landmarks) {
+            const wrist = landmarks[0];
+            
+            // Hujung jari (Fingertips): Index(8), Middle(12), Ring(16), Pinky(20)
+            const tips = [8, 12, 16, 20];
+            // Pangkal Jari (MCP Joints): Index(5), Middle(9), Ring(13), Pinky(17)
+            const mcps = [5, 9, 13, 17];
+
+            let foldedFingers = 0;
+
+            for (let i = 0; i < 4; i++) {
+                const tip = landmarks[tips[i]];
+                const mcp = landmarks[mcps[i]];
+                
+                // Jarak ke pergelangan tangan (wrist)
+                const distTipToWrist = Math.hypot(tip.x - wrist.x, tip.y - wrist.y);
+                const distMcpToWrist = Math.hypot(mcp.x - wrist.x, mcp.y - wrist.y);
+
+                // Jika hujung jari lebih dekat ke wrist daripada pangkal jari, jari terlipat
+                if (distTipToWrist < distMcpToWrist * 1.15) {
+                    foldedFingers++;
+                }
+            }
+
+            // Jika sekurang-kurangnya 3 dari 4 jari terlipat, dikira FIST / TUMBUK
+            return foldedFingers >= 3;
+        }
+
+        // Process MediaPipe Hand Results
+        function onHandResults(results) {
+            // Lukis paparan video webcam ke canvas
+            canvasCtx.save();
+            canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+            
+            // Draw Mirrored Webcam Video
+            canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                const landmarks = results.multiHandLandmarks[0];
+
+                // Ambil koordinat pusat penumbuk (guna MCP jari hantu / index)
+                const rawX = landmarks[9].x;
+                const rawY = landmarks[9].y;
+
+                // Tukar koordinat normalized ke pixel skrin
+                const screenX = rawX * canvasElement.width;
+                const screenY = rawY * canvasElement.height;
+
+                const isFist = checkIsFist(landmarks);
+
+                fistPosition = { x: screenX, y: screenY, isFist: isFist };
+
+                // Update UI status penumbuk
+                if (isFist) {
+                    fistStatusEl.className = "bg-green-900/80 border border-green-500 text-green-200 px-4 py-2 rounded-xl text-xs md:text-sm font-bold flex items-center gap-2";
+                    fistStatusEl.innerHTML = `<span class="w-3 h-3 rounded-full bg-green-400 inline-block animate-ping"></span><span>PUNCH READY! ✊</span>`;
+                } else {
+                    fistStatusEl.className = "bg-yellow-900/80 border border-yellow-500 text-yellow-200 px-4 py-2 rounded-xl text-xs md:text-sm font-bold flex items-center gap-2";
+                    fistStatusEl.innerHTML = `<span class="w-3 h-3 rounded-full bg-yellow-400 inline-block"></span><span>MAKE A FIST (✊)</span>`;
+                }
+
+                // Lukis Visual Penumbuk / Hand Cursor pada Canvas
+                drawFistCursor(screenX, screenY, isFist);
+
+                // Semak Pertindihan / Punch Hit Detection jika game berjalan
+                if (isGameRunning && isFist && !punchCooldown) {
+                    checkPunchHit(screenX, screenY);
+                }
+
+            } else {
+                fistPosition.isFist = false;
+                fistStatusEl.className = "bg-red-900/80 border border-red-500 text-red-200 px-4 py-2 rounded-xl text-xs md:text-sm font-bold flex items-center gap-2";
+                fistStatusEl.innerHTML = `<span class="w-3 h-3 rounded-full bg-red-500 inline-block"></span><span>NO HAND DETECTED</span>`;
+            }
+
+            // Lukis Raksasa dan Kesan Slash jika Game Berjalan
+            if (isGameRunning) {
+                drawMonsters();
+                updateAndDrawSlashes();
+            }
+
+            canvasCtx.restore();
+        }
+
+        // Draw Custom Fist Cursor
+        function drawFistCursor(x, y, isFist) {
+            canvasCtx.save();
+            
+            // Lingkaran Target Outter
+            canvasCtx.beginPath();
+            canvasCtx.arc(x, y, isFist ? 45 : 30, 0, Math.PI * 2);
+            canvasCtx.fillStyle = isFist ? 'rgba(239, 68, 68, 0.4)' : 'rgba(250, 204, 21, 0.3)';
+            canvasCtx.fill();
+            canvasCtx.lineWidth = 3;
+            canvasCtx.strokeStyle = isFist ? '#ef4444' : '#facc15';
+            canvasCtx.stroke();
+
+            // Emoji Penumbuk / Tapak Tangan
+            canvasCtx.font = isFist ? "40px sans-serif" : "30px sans-serif";
+            canvasCtx.textAlign = "center";
+            canvasCtx.textBaseline = "middle";
+            // Un-mirror text supaya emoji tidak terbalik
+            canvasCtx.save();
+            canvasCtx.translate(x, y);
+            canvasCtx.scale(-1, 1);
+            canvasCtx.fillText(isFist ? "✊" : "✋", 0, 0);
+            canvasCtx.restore();
+
+            canvasCtx.restore();
+        }
+
+        // -------------------------------------------------------------
+        // LOGIK MONSTER & GAMEPLAY
+        // -------------------------------------------------------------
+        function loadQuestion(index) {
+            if (index >= questionsData.length) {
+                endGame(true);
+                return;
+            }
+
+            const q = questionsData[index];
+            questionNumber.innerText = `QUESTION ${index + 1} / ${questionsData.length}`;
+            questionImage.innerText = q.image;
+            questionText.innerText = q.question;
+
+            // Reset Timer
+            timer = 15;
+            timerDisplay.innerText = timer;
+            clearInterval(timerInterval);
+            timerInterval = setInterval(updateTimer, 1000);
+
+            // Cipta 3 Monster untuk Pilihan Jawapan
+            spawnMonsters(q.options, q.answer);
+        }
+
+        function spawnMonsters(options, correctAnswer) {
+            activeMonsters = [];
+            const screenW = canvasElement.width;
+            const screenH = canvasElement.height;
+
+            // Bahagikan skrin secara melintang kepada 3 zon
+            const zoneWidth = screenW / 3;
+
+            options.forEach((optText, i) => {
+                const visual = monsterVisuals[i % monsterVisuals.length];
+                
+                // Koordinat Sasaran Monster
+                const posX = (i * zoneWidth) + (zoneWidth / 2);
+                const posY = screenH * 0.65; // Letak kat kawasan tengah-bawah canvas
+
+                activeMonsters.push({
+                    id: i,
+                    text: optText,
+                    isCorrect: optText === correctAnswer,
+                    x: posX,
+                    y: posY,
+                    radius: 80, // Saiz bulatan hit monster
+                    avatar: visual.avatar,
+                    bgColor: visual.bg,
+                    strokeColor: visual.stroke,
+                    offsetY: Math.random() * 100, // Untuk animasi terapung sin wave
+                    isHit: false
+                });
+            });
+        }
+
+        // Render Monster ke atas Canvas
+        function drawMonsters() {
+            const time = Date.now() * 0.003;
+
+            activeMonsters.forEach((m) => {
+                if (m.isHit) return;
+
+                // Animasi terapung naik turun
+                const animY = m.y + Math.sin(time + m.offsetY) * 15;
+
+                canvasCtx.save();
+                
+                // Bayang-bayang Monster
+                canvasCtx.beginPath();
+                canvasCtx.ellipse(m.x, animY + m.radius + 10, m.radius * 0.7, 15, 0, 0, Math.PI * 2);
+                canvasCtx.fillStyle = "rgba(0, 0, 0, 0.3)";
+                canvasCtx.fill();
+
+                // Kad / Body Monster
+                canvasCtx.beginPath();
+                canvasCtx.arc(m.x, animY, m.radius, 0, Math.PI * 2);
+                canvasCtx.fillStyle = m.bgColor;
+                canvasCtx.fill();
+                canvasCtx.lineWidth = 6;
+                canvasCtx.strokeStyle = m.strokeColor;
+                canvasCtx.stroke();
+
+                // Un-mirror canvas context khusus untuk teks & avatar supaya pembacaan betul
+                canvasCtx.save();
+                canvasCtx.translate(m.x, animY);
+                canvasCtx.scale(-1, 1); // Reverse mirroring MediaPipe
+
+                // Avatar Monster
+                canvasCtx.font = "50px sans-serif";
+                canvasCtx.textAlign = "center";
+                canvasCtx.textBaseline = "middle";
+                canvasCtx.fillText(m.avatar, 0, -20);
+
+                // Teks Jawapan pada Banner Monster
+                canvasCtx.fillStyle = "#ffffff";
+                canvasCtx.font = "bold 22px 'Fredoka One', cursive";
+                canvasCtx.shadowColor = "black";
+                canvasCtx.shadowBlur = 6;
+                canvasCtx.fillText(m.text, 0, 35);
+
+                canvasCtx.restore();
+
+                canvasCtx.restore();
+
+                // Simpan Y semasa untuk pengesanan tumbukan yang tepat
+                m.currentY = animY;
+            });
+        }
+
+        // Semak Pertindihan Tumbukan dengan Monster
+        function checkPunchHit(punchX, punchY) {
+            activeMonsters.forEach((m) => {
+                if (m.isHit) return;
+
+                const distance = Math.hypot(punchX - m.x, punchY - (m.currentY || m.y));
+
+                // Jika jarak penumbuk dengan monster kurang daripada jejari monster
+                if (distance < m.radius + 20) {
+                    m.isHit = true;
+                    punchCooldown = true;
+                    
+                    // Kesan Bunyi Tumbuk
+                    soundFX.playPunch();
+
+                    // Cipta Kesan Visual Slash Effect
+                    triggerSlashEffect(m.x, m.currentY || m.y);
+
+                    if (m.isCorrect) {
+                        // JAWAPAN BETUL
+                        soundFX.playCorrect();
+                        score += 10 + timer; // Skor asas + bonus masa
+                        correctHits++;
+                        scoreDisplay.innerText = score;
+
+                        // Tunjuk Floating Text "+10"
+                        addFloatingText(m.x, m.currentY || m.y, `CORRECT! +${10 + timer}`, "#4ade80");
+
+                        // Pindah ke soalan seterusnya selepas delay pendek
+                        setTimeout(() => {
+                            currentQuestionIdx++;
+                            totalAnswered++;
+                            punchCooldown = false;
+                            loadQuestion(currentQuestionIdx);
+                        }, 1000);
+
+                    } else {
+                        // JAWAPAN SALAH
+                        soundFX.playWrong();
+                        lives--;
+                        updateLivesUI();
+                        addFloatingText(m.x, m.currentY || m.y, "WRONG! ❌", "#f87171");
+
+                        if (lives <= 0) {
+                            setTimeout(() => endGame(false), 1000);
+                        } else {
+                            setTimeout(() => {
+                                currentQuestionIdx++;
+                                totalAnswered++;
+                                punchCooldown = false;
+                                loadQuestion(currentQuestionIdx);
+                            }, 1000);
+                        }
+                    }
+                }
+            });
+        }
+
+        // Effect Slash Visual
+        function triggerSlashEffect(x, y) {
+            activeSlashes.push({
+                x: x,
+                y: y,
+                scale: 0.2,
+                opacity: 1,
+                rotation: (Math.random() - 0.5) * 1.5
+            });
+        }
+
+        function updateAndDrawSlashes() {
+            for (let i = activeSlashes.length - 1; i >= 0; i--) {
+                const s = activeSlashes[i];
+                s.scale += 0.15;
+                s.opacity -= 0.08;
+
+                if (s.opacity <= 0) {
+                    activeSlashes.splice(i, 1);
+                    continue;
+                }
+
+                canvasCtx.save();
+                canvasCtx.translate(s.x, s.y);
+                canvasCtx.rotate(s.rotation);
+                canvasCtx.scale(s.scale, s.scale);
+
+                // Lukis Slash Sparks Cross
+                canvasCtx.strokeStyle = `rgba(255, 230, 0, ${s.opacity})`;
+                canvasCtx.lineWidth = 12;
+                canvasCtx.beginPath();
+                canvasCtx.moveTo(-60, -60);
+                canvasCtx.lineTo(60, 60);
+                canvasCtx.stroke();
+
+                canvasCtx.strokeStyle = `rgba(255, 255, 255, ${s.opacity})`;
+                canvasCtx.lineWidth = 6;
+                canvasCtx.beginPath();
+                canvasCtx.moveTo(-60, -60);
+                canvasCtx.lineTo(60, 60);
+                canvasCtx.stroke();
+
+                canvasCtx.restore();
+            }
+        }
+
+        // Floating Feedback Text Overlay
+        function addFloatingText(x, y, text, color) {
+            const el = document.createElement('div');
+            el.className = 'fixed z-40 font-game text-2xl md:text-4xl pointer-events-none transform -translate-x-1/2 -translate-y-1/2 transition-all duration-700 opacity-100';
+            el.style.left = `${window.innerWidth - x}px`; // Invert X back for HTML overlay
+            el.style.top = `${y}px`;
+            el.style.color = color;
+            el.style.textShadow = "0 0 10px rgba(0,0,0,0.8)";
+            el.innerText = text;
+
+            document.body.appendChild(el);
+
+            setTimeout(() => {
+                el.style.top = `${y - 80}px`;
+                el.style.opacity = '0';
+            }, 50);
+
+            setTimeout(() => {
+                el.remove();
+            }, 750);
+        }
+
+        // Timer Update Logic
+        function updateTimer() {
+            if (!isGameRunning) return;
+            
+            timer--;
+            timerDisplay.innerText = timer;
+
+            if (timer <= 0) {
+                clearInterval(timerInterval);
+                soundFX.playWrong();
+                lives--;
+                updateLivesUI();
+
+                addFloatingText(canvasElement.width / 2, canvasElement.height / 2, "TIME'S UP! ⏰", "#fbbf24");
+
+                if (lives <= 0) {
+                    setTimeout(() => endGame(false), 1200);
+                } else {
+                    setTimeout(() => {
+                        currentQuestionIdx++;
+                        totalAnswered++;
+                        loadQuestion(currentQuestionIdx);
+                    }, 1200);
+                }
+            }
+        }
+
+        function updateLivesUI() {
+            let heartsHtml = '';
+            for (let i = 0; i < 3; i++) {
+                if (i < lives) {
+                    heartsHtml += '❤️ ';
+                } else {
+                    heartsHtml += '🖤 ';
+                }
+            }
+            livesContainer.innerHTML = heartsHtml;
+        }
+
+        // -------------------------------------------------------------
+        // ALUR PERMAINAN (START / END GAME)
+        // -------------------------------------------------------------
+        btnStart.addEventListener('click', () => {
+            soundFX.init();
+            loadingText.classList.remove('hidden');
+            btnStart.disabled = true;
+            btnStart.classList.add('opacity-50');
+
+            // Mulakan kamera jika belum
+            if (!camera) {
+                startCamera();
+            }
+
+            setTimeout(() => {
+                startScreen.classList.add('hidden');
+                startGame();
+            }, 1500);
+        });
+
+        btnRestart.addEventListener('click', () => {
+            soundFX.init();
+            endScreen.classList.add('hidden');
+            startGame();
+        });
+
+        function startGame() {
+            currentQuestionIdx = 0;
+            score = 0;
+            lives = 3;
+            totalAnswered = 0;
+            correctHits = 0;
+            punchCooldown = false;
+
+            scoreDisplay.innerText = score;
+            updateLivesUI();
+            isGameRunning = true;
+
+            loadQuestion(currentQuestionIdx);
+        }
+
+        function endGame(isWin) {
+            isGameRunning = false;
+            clearInterval(timerInterval);
+
+            const endIcon = document.getElementById('end-icon');
+            const endTitle = document.getElementById('end-title');
+            const endSubtitle = document.getElementById('end-subtitle');
+            const finalScore = document.getElementById('final-score');
+            const finalAccuracy = document.getElementById('final-accuracy');
+
+            finalScore.innerText = score;
+            const accuracy = totalAnswered > 0 ? Math.round((correctHits / totalAnswered) * 100) : 0;
+            finalAccuracy.innerText = `${accuracy}%`;
+
+            if (isWin || lives > 0) {
+                endIcon.innerText = "🏆";
+                endTitle.innerText = "VICTORY!";
+                endTitle.className = "font-game text-4xl text-yellow-400 mb-2";
+                endSubtitle.innerText = "Awesome job! You punched all the right nouns!";
+                soundFX.playCorrect();
+            } else {
+                endIcon.innerText = "💥";
+                endTitle.innerText = "GAME OVER!";
+                endTitle.className = "font-game text-4xl text-red-500 mb-2";
+                endSubtitle.innerText = "Don't give up! Try punching the correct answers again!";
+                soundFX.playGameOver();
+            }
+
+            endScreen.classList.remove('hidden');
+        }
+
+        // Pre-load camera apabila dokumen bersedia
+        window.onload = () => {
+            // Autostart camera for background readying
+            startCamera();
+        };
+    </script>
+</body>
+</html>
